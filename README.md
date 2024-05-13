@@ -1,15 +1,8 @@
-<<<<<<< HEAD
 # Replication Code for "Gender Convergence in Earnings and Changing Pathways towards Intergenerational Income Persistence"
 
 ## Nino Cricco
 
 These files contain the replication code for the article "Gender Convergence in Earnings and Changing Pathways towards Intergenerational Income Persistence", the first article from a broader dissertation project. I use publicly available data from the Panel Study of Income Dynamics (PSID), which are available to researchers at <https://psidonline.isr.umich.edu/>. This work is ongoing and files are continually updated. 
-=======
-# Replication Code for "Gender Convergence in Earnigns and Changing Pathways towards Intergenerational Income Persistence"
-
-## Nino Cricco
-
-These files contain the replication code for the article "Gender Convergence in Earnigns and Changing Pathways towards Intergenerational Income Persistence", the first article from a broader dissertation project. I use publicly available data from the Panel Study of Income Dynamics (PSID), which are available to researchers at <https://psidonline.isr.umich.edu/>. This work is ongoing and files are continually updated. 
 >>>>>>> e675516cd84d094e977e4c0d2ac31fe9865c786b
 
 ## Code Files
