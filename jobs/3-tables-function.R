@@ -20,7 +20,9 @@ generate_desc_stats <- function(data) {
     summarise(across(
       c(num_observedinchildhood, parent_hdsp_income, num_observedinadulthood,
         parent_head_age, parent_age, hdsp_income, 
-        own_income, age, ever_married), 
+        own_income, age, ever_married, 
+        married, zero_earnings, not_in_lf, own_income_share,
+        offspring_own_income_pct_rank), 
       list(mean = ~ mean(.x, na.rm = TRUE), sd = ~ sd(.x, na.rm = TRUE)),
       .names = "{.col}_{.fn}"), 
       n = n()) %>%
@@ -52,6 +54,8 @@ generate_desc_stats_table <- function(data){
   
   return(desc_stats_latex)
 }
+
+
 
 #------------------------------------------------------------------------------
 # TABLE 2: ESTIMATED PARAMETERS AND COUNTERFACTUAL SIMULATIONS
@@ -144,11 +148,8 @@ generate_params_sims_table <- function(data, gender = "Women"){
   
 }
   
-#------------------------------------------------------------------------------
-# TABLE 3: ANALYSES BY MARITAL STATUS
-#------------------------------------------------------------------------------
-generate_decomp_marstat <- function(data) {
-  
+
+generate_marstat_params <- function(data){
   data_augmented <- data %>%
     group_by(cohort, female) %>%
     do(augmented = broom::augment(lm(
@@ -194,7 +195,17 @@ generate_decomp_marstat <- function(data) {
     ungroup() %>% 
     select(female, cohort, ever_married, model_name, estimate) %>%
     left_join(., meanvar_marstat, by = c("female", "cohort", "ever_married")) 
-
+  
+  return(models_means_marstat)
+  
+}
+#------------------------------------------------------------------------------
+# TABLE 3: ANALYSES BY MARITAL STATUS
+#------------------------------------------------------------------------------
+generate_decomp_marstat <- function(data) {
+  
+  models_means_marstat <- generate_marstat_params(data)
+  
   results_marstat_full <- models_means_marstat %>%
     filter(model_name != "family_parent") %>% 
     mutate(
@@ -286,7 +297,7 @@ generate_t3 <- function(data, gender = 1){
       mutate(across(where(is.numeric), round, digits = 2)),
     format = "latex", booktabs = TRUE,
     caption = sprintf(
-      "Decomposing Changes in %s'sParameters by Marital Status", gender)) %>%
+      "Decomposing Changes in Parameters by Marital Status", gender)) %>%
     pack_rows("Earnings Persistence", 1, 2, bold = F) %>%
     pack_rows("Earnings-Income Correlation", 3, 4, bold = F) %>%
     pack_rows("Residual Transmission", 5, 6, bold = F)
