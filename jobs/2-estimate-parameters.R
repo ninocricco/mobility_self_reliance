@@ -24,7 +24,7 @@ estimate_parameters <- function(data, by_marstat = F){
     own_parent = offspring_gender_own_income_pct_rank ~ 
       parent_hdsp_income_pct_rank,
     family_own = offspring_hdsp_income_pct_rank ~ 
-      offspring_gender_own_income_pct_rank,
+      offspring_gender_own_income_pct_rank + parent_hdsp_income_pct_rank,
     family_parent = offspring_hdsp_income_pct_rank ~ 
       parent_hdsp_income_pct_rank)
   
@@ -33,35 +33,11 @@ estimate_parameters <- function(data, by_marstat = F){
     lm(formula, data = data_to_fit)
     }
   
-  # Function to calculate residuals and fit a new model
-  fit_residual_model <- function(model, data_to_fit, formula_for_residuals) {
-    # Calculate residuals from the initial model and add them to the data frame
-    residuals_data <- data_to_fit %>% 
-      mutate(residuals = resid(model))
-    
-    # Fit a new model to these residuals
-    lm(formula_for_residuals, data = residuals_data)
-    }
-
-  # Apply initial models
+  # Apply models
   initial_models <- map(
     formulas, ~ nested_data %>%
       mutate(fitted_models = map(data, fit_models, .x))) %>%
     imap(., ~ mutate(.x, model_name = .y))
-
-  # Fitting residual models
-  residual_models <- map(initial_models, ~ .x %>%
-                           mutate(fitted_models = map2(
-                             fitted_models, data, 
-                             ~ fit_residual_model(
-                               .x, .y, "residuals ~ parent_hdsp_income_pct_rank"
-                               )))) %>%
-    imap(., ~ mutate(.x, model_name = paste("residual", .y, sep = "_")))
-
-  names(residual_models) <- paste(names(residual_models), "_residuals", sep = "")
-
-  # Combining primary models with residualized models
-  models_all <- c(initial_models, residual_models)
   
   # Processing function to extract parameters of interest
   process_models <- function(df, group_keys) {
@@ -100,7 +76,7 @@ estimate_parameters <- function(data, by_marstat = F){
 
   # Apply processing function to model list to output estimated parameters by
   # cohort and gender
-  combined_results <- map_df(models_all, ~ {
+  combined_results <- map_df(initial_models, ~ {
     # Group by cohort and female to handle unique combinations within each tibble
     if(by_marstat == T){
       grouped_df <- group_by(.x, cohort, female, ever_married)
