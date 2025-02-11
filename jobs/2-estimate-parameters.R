@@ -5,124 +5,90 @@
 # CONTACT: ncricco@g.harvard.edu
 #------------------------------------------------------------------------------
 
-estimate_parameters <- function(data, by_marstat = F){
+estimate_parameters <- function(
+    data, 
+    by_marstat = FALSE, 
+    by_parentq = FALSE,
+    var_specs = list(
+      offspring_own = "offspring_own_income_gender_pct_rank",
+      offspring_hdsp = "offspring_hdsp_income_gender_pct_rank",
+      parent_hdsp = "parent_hdsp_income_gender_pct_rank"
+    )
+) {
+  # Create grouped and nested dataframe
+  nested_df <- data %>%
+    group_by(cohort, female) %>%
+    {if (by_marstat) group_by(., ever_married, .add = TRUE)
+      else if (by_parentq) group_by(., parent_hdsp_income_quintile, .add = TRUE)
+      else .} %>%
+    nest()
   
-  if(by_marstat == T){
-    nested_data <- data %>%
-      group_by(cohort, female, ever_married) %>%
-      nest()
-  }
-  else{
-    nested_data <- data %>%
-      group_by(cohort, female) %>%
-      nest()
-  }
+  # Define model specifications using the variable specifications
+  model_specs <- tribble(
+    ~model_name, ~formula,
+    "own_parent", paste(var_specs$offspring_own, "~", var_specs$parent_hdsp),
+    "family_own", paste(var_specs$offspring_hdsp, "~", var_specs$offspring_own),
+    "family_parent", paste(var_specs$offspring_hdsp, "~", var_specs$parent_hdsp)
+  )
   
-  # Defining formulas for each model
-  formulas <- list(
-    own_parent = offspring_gender_own_income_pct_rank ~ 
-      parent_hdsp_income_pct_rank,
-    family_own = offspring_hdsp_income_pct_rank ~ 
-      offspring_gender_own_income_pct_rank,
-    family_parent = offspring_hdsp_income_pct_rank ~ 
-      parent_hdsp_income_pct_rank)
+  # Add residual model specification
+  residual_spec <- tribble(
+    ~model_name, ~formula,
+    "family_own_residuals", paste("residuals ~", var_specs$parent_hdsp)
+  )
   
-  # Create a function that creates tidy outputs from model result
-  fit_models <- function(data_to_fit, formula) {
-    lm(formula, data = data_to_fit)
-  }
-  
-  # Function to calculate residuals and fit a new model
-  fit_residual_model <- function(model, data_to_fit, formula_for_residuals) {
-    # Calculate residuals from the initial model and add them to the data frame
-    residuals_data <- data_to_fit %>% 
-      mutate(residuals = resid(model))
-    
-    # Fit a new model to these residuals
-    lm(formula_for_residuals, data = residuals_data)
-  }
-  
-  # Apply initial models
-  initial_models <- map(
-    formulas, ~ nested_data %>%
-      mutate(fitted_models = map(data, fit_models, .x))) %>%
-    imap(., ~ mutate(.x, model_name = .y))
-  
-  # Fitting residual models
-  residual_models <- map(initial_models, ~ .x %>%
-                           mutate(fitted_models = map2(
-                             fitted_models, data, 
-                             ~ fit_residual_model(
-                               .x, .y, "residuals ~ parent_hdsp_income_pct_rank"
-                             )))) %>%
-    imap(., ~ mutate(.x, model_name = paste("residual", .y, sep = "_")))
-  
-  names(residual_models) <- paste(names(residual_models), "_residuals", sep = "")
-  
-  # Combining primary models with residualized models
-  models_all <- c(initial_models, residual_models)
-  
-  # Processing function to extract parameters of interest
-  process_models <- function(df, group_keys) {
-    map2_df(df$fitted_models, df$model_name, ~ {
-      model <- .x
-      model_name <- .y
+  # Function to fit models and extract parameters
+  results_df <- nested_df %>%
+    mutate(models = map(data, function(df) {
+      # Fit initial models
+      initial_models <- model_specs %>%
+        mutate(
+          fitted_model = map(formula, ~lm(as.formula(.x), data = df)),
+          model_summary = map(fitted_model, broom::tidy, conf.int = TRUE),
+          model_stats = map(fitted_model, broom::glance)
+        )
       
-      # Extract cohort and female from group_keys
-      cohort <- group_keys$cohort
-      female <- group_keys$female
-      if(by_marstat == T){
-        ever_married <- group_keys$ever_married
-      }
+      # Calculate residuals for family_own model
+      family_own_model <- initial_models %>%
+        filter(model_name == "family_own") %>%
+        pull(fitted_model) %>%
+        .[[1]]
       
+      df <- df %>%
+        mutate(residuals = resid(family_own_model))
       
-      tidy_data <- broom::tidy(model, conf.int = T)
-      glance_data <- broom::glance(model)
+      # Fit residual model
+      residual_model <- residual_spec %>%
+        mutate(
+          fitted_model = map(formula, ~lm(as.formula(.x), data = df)),
+          model_summary = map(fitted_model, broom::tidy, conf.int = TRUE),
+          model_stats = map(fitted_model, broom::glance)
+        )
       
-      if(by_marstat == T){
-        tidy_data %>%
-          mutate(cohort = cohort,
-                 female = female,
-                 ever_married = ever_married,
-                 model_name = model_name,
-                 adj_r_squared = glance_data$adj.r.squared[1])
-      }
-      else{
-        tidy_data %>%
-          mutate(cohort = cohort,
-                 female = female,
-                 model_name = model_name,
-                 adj_r_squared = glance_data$adj.r.squared[1])
-      }
-    })
-  }
+      # Combine all models
+      bind_rows(initial_models, residual_model)
+    })) %>%
+    select(-data) %>%
+    unnest(models) %>%
+    unnest(model_summary) %>%
+    mutate(adj_r_squared = map_dbl(model_stats, ~.x$adj.r.squared)) %>%
+    select(-c(fitted_model, model_stats, formula))
   
-  # Apply processing function to model list to output estimated parameters by
-  # cohort and gender
-  combined_results <- map_df(models_all, ~ {
-    # Group by cohort and female to handle unique combinations within each tibble
-    if(by_marstat == T){
-      grouped_df <- group_by(.x, cohort, female, ever_married)
-    }
-    else{
-      grouped_df <- group_by(.x, cohort, female)
-    }
-    
-    # Use group_map to apply process_models to each subgroup
-    processed_models <- group_map(grouped_df, process_models, .keep = TRUE) %>% 
-      bind_rows()
-    
-    return(processed_models)
-  })
-  return(combined_results)
+  return(results_df)
+  
 }
 
-#------------------------------------------------------------------------------
-# FUNCTION TO GENERATE TABLE NEEDED FOR FIGURES
-#------------------------------------------------------------------------------
-
-generate_change_table <- function(data = data, object = "summ"){
-  estimated_parameters <- estimate_parameters(data)
+# Modified generate_change_table function
+generate_change_table <- function(
+    data = data, 
+    object = "summ",
+    var_specs = list(
+      offspring_own = "offspring_own_income_gender_pct_rank",
+      offspring_hdsp = "offspring_hdsp_income_gender_pct_rank",
+      parent_hdsp = "parent_hdsp_income_gender_pct_rank"
+    )
+) {
+  estimated_parameters <- estimate_parameters(data, var_specs = var_specs)
   
   # Creating table showing estimated parameters
   change_table_all <- estimated_parameters %>% 
@@ -135,6 +101,7 @@ generate_change_table <- function(data = data, object = "summ"){
            key = factor(key, levels = c("Slope", "Adj.R2"))) %>%
     rename(estimate = key) %>%
     arrange(Gender, model_name, estimate) %>%
+    ungroup() %>%
     select(Gender, model_name, estimate, everything(), -female)
   
   change_table <- change_table_all %>%
@@ -148,5 +115,172 @@ generate_change_table <- function(data = data, object = "summ"){
   else{
     return(change_table)
   }
+}
+
+estimate_share <- function(data){
+  
+  share <- generate_change_table(data) %>% 
+    pivot_wider(names_from = model_name, values_from = value) %>%
+    transmute(Gender, key, 
+              share_earnings = (own_parent * family_own)/family_parent)
+  return(share)
   
 }
+
+estimate_ci_share_bs <- function(data, n_bootstrap = 10000, conf = .95){
+  
+  # Calculate cohort sizes dynamically
+  cohort_sizes <- data %>%
+    group_by(cohort, female) %>%
+    summarize(n = n(), .groups = 'drop') %>%
+    arrange(cohort, female) %>%
+    pull(n)
+  
+  bs_estimates <- list()
+  
+  for(i in 1:n_bootstrap) {
+    set.seed(i)
+    bs_sample <- data %>%
+      group_by(cohort, female) %>%
+      nest() %>%
+      ungroup() %>%
+      arrange(cohort, female) %>%
+      mutate(n = cohort_sizes) %>%
+      mutate(samp = map2(data, n, ~sample_n(.x, .y, replace = TRUE))) %>%
+      select(-c(data, n)) %>%
+      unnest(samp)
+      
+      bs_estimates[[i]] <- estimate_share(data = bs_sample)
+  }
+
+  # Process bootstrap results
+  df_combined <- do.call(rbind, bs_estimates) %>%
+    pivot_wider(values_from = share_earnings, names_from = c(Gender, key)) %>%
+    unnest()
+  
+  # Calculate percentiles
+  df_percentiles <- sapply(df_combined, function(x) quantile(x, probs=c(1-conf, conf)))
+  rownames(df_percentiles) <- c("min", "max")
+  
+  return(df_percentiles)
+  
+}
+
+estimate_interactions <- function(
+    data, 
+    by_marstat = FALSE, 
+    by_parentq = FALSE,
+    return_tests = TRUE,
+    var_specs = list(
+      offspring_own = "offspring_own_income_gender_pct_rank",
+      offspring_hdsp = "offspring_hdsp_income_gender_pct_rank",
+      parent_hdsp = "parent_hdsp_income_gender_pct_rank"
+    )
+) {
+  
+  # Function to get residuals from family_own model
+  get_residuals <- function(data) {
+    family_own_model <- lm(paste(var_specs$offspring_hdsp, "~", var_specs$offspring_own), 
+                           data = data)
+    data$residuals <- resid(family_own_model)
+    return(data)
+  }
+  
+  # Add residuals to data
+  data <- data %>%
+    group_by(cohort) %>%
+    group_modify(~get_residuals(.x)) %>%
+    ungroup()
+  
+  # Define model specifications including residual model
+  model_specs <- tribble(
+    ~model_name, ~y_var, ~x_var,
+    "own_parent", var_specs$offspring_own, var_specs$parent_hdsp,
+    "family_own", var_specs$offspring_hdsp, var_specs$offspring_own,
+    "family_parent", var_specs$offspring_hdsp, var_specs$parent_hdsp,
+    "family_own_residuals", "residuals", var_specs$parent_hdsp
+  )
+  
+  # Function to run both types of tests for a single model
+  test_model <- function(data, y_var, x_var, model_name) {
+    # Get unique cohorts
+    cohorts <- sort(unique(data$cohort))
+    
+    # 1. Test gender differences within each cohort
+    gender_tests <- map_dfr(cohorts, function(c) {
+      # Subset data for this cohort
+      cohort_data <- data %>%
+        filter(cohort == c) %>%
+        mutate(gender = factor(female, levels = c(0, 1), labels = c("Men", "Women")))
+      
+      # Fit model with gender interaction
+      model <- lm(paste(y_var, "~", x_var, "* gender"), data = cohort_data)
+      
+      # Extract results
+      broom::tidy(model, conf.int = TRUE) %>%
+        filter(str_detect(term, "gender")) %>%
+        mutate(
+          model = model_name,
+          cohort = c,
+          test_type = paste("Gender Difference,", c)
+        )
+    })
+    
+    # 2. Test cohort differences within each gender
+    cohort_tests <- data %>%
+      mutate(gender = factor(female, levels = c(0, 1), labels = c("Men", "Women"))) %>%
+      group_by(gender) %>%
+      group_modify(~{
+        model <- lm(paste(y_var, "~", x_var, "* cohort"), data = .x)
+        broom::tidy(model, conf.int = TRUE) %>%
+          filter(str_detect(term, "cohort")) %>%
+          mutate(
+            model = model_name,
+            test_type = paste("Cohort Change,", .y$gender)
+          )
+      }) %>%
+      ungroup()
+    
+    # Combine all results
+    bind_rows(gender_tests, cohort_tests)
+  }
+  
+  # Run tests for all models
+  test_results <- model_specs %>%
+    pmap_dfr(~test_model(data, ..2, ..3, ..1)) %>%
+    mutate(
+      stars = case_when(
+        p.value < 0.01 ~ "***",
+        p.value < 0.05 ~ "**",
+        p.value < 0.1 ~ "*",
+        TRUE ~ ""
+      ),
+      formatted_result = sprintf("%.3f%s\n(%.3f, %.3f)\n[%.3f]", 
+                                 estimate, stars, conf.low, conf.high, p.value)
+    ) %>%
+    arrange(model, test_type)
+  
+  return(test_results)
+}
+
+# Modified generate_supplement_estimates function
+generate_supplement_estimates <- function(
+    data = data,
+    var_specs = list(
+      offspring_own = "offspring_own_income_gender_pct_rank",
+      offspring_hdsp = "offspring_hdsp_income_gender_pct_rank",
+      parent_hdsp = "parent_hdsp_income_gender_pct_rank"
+    )
+) {
+  est <- generate_change_table(data, var_specs = var_specs) %>% 
+    pivot_wider(names_from = model_name, values_from = value) %>%
+    transmute(Gender, key, family_parent, 
+              share_earnings = (own_parent * family_own)/family_parent, 
+              own_parent, family_own) %>%
+    gather(param, value, -c(Gender, key)) %>%
+    pivot_wider(names_from = c(Gender, param), values_from = value) %>%
+    select(key, starts_with("Men"), everything())
+  
+  return(est)
+}
+

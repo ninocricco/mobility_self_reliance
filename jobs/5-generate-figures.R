@@ -7,9 +7,9 @@
 
 source("jobs/4-figures-function.R")
 
-generate_fig0(gen_data())
+generate_fig0(gen_data("1950-1960" = 1960:1970, "1970-1980" = 1970:1980))
 
-generate_fig1(gen_data())
+generate_fig1(gen_data(cohorts = list("1950-1955" = 1950:1955, "1975-1980" = 1970:1975)))
 
 generate_fig2(gen_data())
 generate_fig3(gen_data())
