@@ -9,6 +9,7 @@ estimate_parameters <- function(
     data, 
     by_marstat = FALSE, 
     by_parentq = FALSE,
+    by_race = FALSE,
     var_specs = list(
       offspring_own = "offspring_own_income_gender_pct_rank",
       offspring_hdsp = "offspring_hdsp_income_gender_pct_rank",
@@ -20,6 +21,7 @@ estimate_parameters <- function(
     group_by(cohort, female) %>%
     {if (by_marstat) group_by(., ever_married, .add = TRUE)
       else if (by_parentq) group_by(., parent_hdsp_income_quintile, .add = TRUE)
+      else if (by_race) group_by(., race_ever, .add = TRUE)
       else .} %>%
     nest()
   
@@ -82,14 +84,17 @@ estimate_parameters <- function(
 generate_change_table <- function(
     data = data, 
     object = "summ",
+    by_race = FALSE,
     var_specs = list(
       offspring_own = "offspring_own_income_gender_pct_rank",
       offspring_hdsp = "offspring_hdsp_income_gender_pct_rank",
       parent_hdsp = "parent_hdsp_income_gender_pct_rank"
     )
 ) {
-  estimated_parameters <- estimate_parameters(data, var_specs = var_specs)
+  estimated_parameters <- estimate_parameters(
+    data, var_specs = var_specs, by_race = by_race)
   
+  if(by_race == FALSE){
   # Creating table showing estimated parameters
   change_table_all <- estimated_parameters %>% 
     filter(term != "(Intercept)") %>%
@@ -108,6 +113,26 @@ generate_change_table <- function(
     filter(estimate == "Slope") %>%
     select(-estimate) %>%
     gather(key, value, - c(Gender, model_name))
+  }
+  else{
+    change_table_all <- estimated_parameters %>% 
+      filter(term != "(Intercept)") %>%
+      select(cohort, female, model_name, race_ever, estimate, adj_r_squared) %>%
+      gather(key, value, -c(cohort, female, race_ever, model_name)) %>%
+      pivot_wider(names_from = c(cohort), values_from = value) %>%
+      mutate(Gender = ifelse(female == 0, "Men", "Women"),
+             key = ifelse(key == "estimate", "Slope", "Adj.R2"),
+             key = factor(key, levels = c("Slope", "Adj.R2"))) %>%
+      rename(estimate = key) %>%
+      arrange(Gender, model_name, estimate) %>%
+      ungroup() %>%
+      select(Gender, race_ever, model_name, estimate, everything(), -female)
+    
+    change_table <- change_table_all %>%
+      filter(estimate == "Slope") %>%
+      select(-estimate) %>%
+      gather(key, value, - c(Gender, race_ever, model_name))
+  }
   
   if(object == "all"){
     return(change_table_all)

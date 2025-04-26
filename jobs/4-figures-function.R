@@ -70,7 +70,7 @@ generate_fig1 <- function(data = data, bs_cis = F,
       y = "Percent", 
       x = "Birth Cohort",
       fill = "Gender & Cohort",
-      caption = "Data from the Panel Study of Income Dynamics. \n Error bras show 95 % bootstrapped confidence intervals."
+      caption = "Data from the Panel Study of Income Dynamics. \n Error bars show 95 % bootstrapped confidence intervals."
     ) +
     scale_fill_manual(values = color_palette) +
     theme(
@@ -93,7 +93,7 @@ generate_fig1 <- function(data = data, bs_cis = F,
 # FIG 2: All Estimated Parameters by Gender and cohort
 #------------------------------------------------------------------------------
 
-generate_fig2a <- function(data = data, object = "fig", by_marstat = F){
+generate_fig2a <- function(data = data, object = "fig"){
   
   # Define new labels for x-axis
   labels <- c(
@@ -110,14 +110,11 @@ generate_fig2a <- function(data = data, object = "fig", by_marstat = F){
   color_palette <- c("steelblue2", "orange1",
                      "navyblue", "orange4") 
   
-  if(by_marstat == F){
-    est_param <- estimate_parameters(data)
-  } else {
-    est_param <- estimate_parameters(data, by_marstat = T)
-  }
+
+  est_param <- estimate_parameters(data, by_marstat = F)
   
   est_param <- est_param %>%
-    filter(term != "(Intercept)", model_name != "spouse_own") %>%
+    filter(term != "(Intercept)") %>%
     mutate(
       Gender = factor(ifelse(female == 1, "Women", "Men"), 
                       levels = c("Women", "Men")),
@@ -132,7 +129,6 @@ generate_fig2a <- function(data = data, object = "fig", by_marstat = F){
                                      "family_own",
                                      "family_own_residuals")))
   
-  if(by_marstat == F){
     fig2 <- est_param %>%
       ggplot(aes(x = model_name, y = estimate, color = group)) +
       geom_point(size = 2, position = position_dodge(width = .6)) +                  
@@ -163,48 +159,6 @@ generate_fig2a <- function(data = data, object = "fig", by_marstat = F){
       guides(
         color = guide_legend(override.aes = list(size = 2))
       )
-    
-  } else {
-    pd <- position_dodge(width = 0.6)
-    fig2 <- est_param %>%
-      mutate(ever_married = ifelse(ever_married == 1, "Ever Married", "Never Married")) %>%
-      ggplot(aes(x = model_name, y = estimate, color = group)) +
-      geom_point(
-        aes(y = estimate),
-        size = 2, 
-        position = pd
-      ) +                  
-      geom_errorbar(
-        aes(y = estimate, ymin = conf.low, ymax = conf.high),
-        width = 0.2, 
-        position = pd
-      ) +
-      theme_bw() +
-      facet_wrap(~ever_married) +
-      labs(title = "Figure 2, Panel A",
-           subtitle = "Linear Parameter Estimates by Gender, Cohort, and Marital Status",
-           y = "Rank-Rank Slope", 
-           x = "", 
-           color = "Gender & Cohort",
-           caption = "") +
-      scale_color_manual(values = color_palette) +
-      scale_x_discrete(labels = labels) + 
-      theme(
-        legend.position = c(0.02, 0.98),
-        legend.justification = c(0, 1),
-        legend.box.background = element_rect(color = "black", fill = "white", linewidth = 0.5),
-        legend.background = element_rect(fill = "white"),
-        legend.key = element_rect(fill = "white"),
-        plot.title = element_text(hjust = 0.5),
-        plot.subtitle = element_text(hjust = 0.5),
-        legend.title = element_text(""),
-        legend.margin = margin(6, 6, 6, 6),
-        axis.text.x = element_text(angle = 20, hjust = 1)
-      ) +
-      guides(
-        color = guide_legend(override.aes = list(size = 2))
-      )
-  }
   
   return(fig2)
 }
@@ -215,13 +169,11 @@ generate_fig2b  <- function(test_results) {
     "family_parent" = "Parent - Child Income",
     "own_parent" = "Parent - Child Earnings",
     "family_own" = "Child Earnings - Child Income",
-    "spouse_own" = "Child Earnings - Spouse Earnings",
     "family_own_residuals" = "Parent - Child Income | Earnings"
   )
   
   # Create combined labels for plotting
   plot_data <- test_results %>%
-    filter(model %!in% c("spouse_own")) %>%
     filter(str_detect(term, ":")) %>%
     mutate(
       # Create more descriptive model names
@@ -256,6 +208,8 @@ generate_fig2b  <- function(test_results) {
       strip.background = element_rect(fill = "white")
     )
 }
+
+grid.arrange(generate_fig2a(gen_data()$offspring_perm), generate_fig2b(estimate_interactions(gen_data()$offspring_perm)), nrow = 2)
 
 #------------------------------------------------------------------------------
 # FIGURE 3: VISUALIZING RELATIONSHIPS
@@ -511,7 +465,7 @@ generate_fig5 <- function(data = data, method = method) {
       gp = gpar(fontsize = 12)
     ),
     bottom = textGrob(
-      "Data from the Panel Study of Income Dynamics. \nEstimates using Generalized Additive Models.",
+      "Data from the Panel Study of Income Dynamics.",
       gp = gpar(fontsize = 10),
       hjust = 1,  # Right align
       x = 1       # Position at rightmost edge
@@ -521,14 +475,394 @@ generate_fig5 <- function(data = data, method = method) {
   return(fig5)
 }
 
+#------------------------------------------------------------------------------
+# FIGURE 6: By Race
+#------------------------------------------------------------------------------
 
+generate_fig6 <- function(data = data, object = "fig"){
+  
+  # Define new labels for x-axis
+  labels <- c(
+    "family_parent" = "Parent - Child Income",
+    "own_parent" = "Parent - Child Earnings",
+    "family_own" = "Child Earnings - Child Income",
+    "family_own_residuals" = "Parent - Child Income | Earnings"
+  )
+  
+  # Get unique cohort values
+  cohort_values <- sort(unique(data$cohort))
+  
+  # Define color palette
+  color_palette <- c("steelblue2", "orange1",
+                     "navyblue", "orange4") 
+  
 
+  est_param <- estimate_parameters(data, by_race = T) %>%
+    filter(race_ever %in% c("White", "Black"))
+  
+  est_param <- est_param %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      Gender = factor(ifelse(female == 1, "Women", "Men"), 
+                      levels = c("Women", "Men")),
+      group = factor(paste(Gender, cohort),
+                     levels = c(paste("Men", cohort_values[1]),
+                                paste("Women", cohort_values[1]), 
+                                paste("Men", cohort_values[2]),
+                                paste("Women", cohort_values[2]))),
+      model_name = factor(model_name, 
+                          levels = c("family_parent",
+                                     "own_parent",
+                                     "family_own",
+                                     "family_own_residuals")))
+  
+    pd <- position_dodge(width = 0.6)
+    fig6 <- est_param %>%
+      ggplot(aes(x = model_name, y = estimate, color = group)) +
+      geom_point(
+        aes(y = estimate),
+        size = 2, 
+        position = pd
+      ) +                  
+      geom_errorbar(
+        aes(y = estimate, ymin = conf.low, ymax = conf.high),
+        width = 0.2, 
+        position = pd
+      ) +
+      theme_bw() +
+      facet_wrap(~race_ever) +
+      labs(title = "Figure A3: Linear Parameter Estimates by Race, Gender, and Cohort",
+           y = "Rank-Rank Slope", 
+           x = "", 
+           color = "Gender & Cohort",
+           caption = "Data from the Panel Study of Income Dynamics. \n Includes the Survey of Economic Opportunity Sample. \n Error bars show 95% confidence intervals."
+          ) +
+      scale_color_manual(values = color_palette) +
+      scale_x_discrete(labels = labels) + 
+      theme(
+        legend.position = "",
+        legend.justification = c(0, 1),
+        legend.box.background = element_rect(color = "black", fill = "white", linewidth = 0.5),
+        legend.background = element_rect(fill = "white"),
+        legend.key = element_rect(fill = "white"),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.title = element_text(""),
+        legend.margin = margin(6, 6, 6, 6),
+        axis.text.x = element_text(angle = 20, hjust = 1)
+      ) +
+      guides(
+        color = guide_legend(override.aes = list(size = 2))
+      )
+    return(fig6)
+    
+}
+
+generate_fig5_race <- function(data = data, method = method) {
+  # Get unique cohort values
+  cohort_values <- sort(unique(data$cohort))
+  
+  # Define color palette
+  color_palette <- c("steelblue2", "orange1",
+                     "navyblue", "orange4") 
+  
+  # Data preparation
+  plot_data <- data %>%
+    mutate(
+      married_norm = married/num_observedinadulthood,
+      ft_norm = ft/num_observedinadulthood,
+      Gender = factor(ifelse(female == 1, "Women", "Men"), 
+                      levels = c("Women", "Men")),
+      group = factor(paste(Gender, cohort),
+                     levels = c(paste("Men", cohort_values[1]),
+                                paste("Women", cohort_values[1]), 
+                                paste("Men", cohort_values[2]),
+                                paste("Women", cohort_values[2])))
+    ) %>%
+    filter(race_ever %in% c("Black", "White"))
+  
+  # Common theme elements
+  plot_theme <- theme_bw() +
+    theme(
+      legend.position = c(0.7, 0.3),
+      legend.justification = c(0, 1),
+      legend.box.background = element_rect(color = "black", fill = "white", linewidth = 0.5),
+      legend.background = element_rect(fill = "white"),
+      legend.key = element_rect(fill = "white"),
+      plot.title = element_text(hjust = 0.5, size = 10),
+      legend.title = element_text(""),
+      legend.margin = margin(6, 6, 6, 6)
+    )
+  
+  # Common scale elements
+  plot_scales <- list(
+    scale_color_manual(values = color_palette),
+    scale_fill_manual(values = color_palette),
+    scale_linetype_manual(values = c("solid", "dashed"))
+  )
+  
+  # Common guide elements
+  plot_guides <- guides(
+    color = guide_legend(override.aes = list(alpha = 1, size = 2)),
+    fill = "none",
+    linetype = "none"
+  )
+  
+  # Create the three plots
+  fig5_a <- ggplot(plot_data, 
+                   aes(x = parent_hdsp_income_gender_pct_rank, 
+                       y = married_norm, 
+                       color = group,
+                       linetype = cohort)) +
+    geom_smooth(method = method, aes(fill = group), alpha = 0.2) +
+    labs(x = "Parent Income Rank",
+         y = "% Years Partnered",
+         title = "A: Partnership",
+         color = "Gender & Cohort") +
+    plot_theme +
+    facet_wrap(~race_ever) +
+    plot_scales +
+    plot_guides
+  
+  fig5_b <- ggplot(plot_data, 
+                   aes(x = parent_hdsp_income_gender_pct_rank, 
+                       y = ft_norm, 
+                       color = group,
+                       linetype = cohort)) +
+    geom_smooth(method = method, aes(fill = group), alpha = 0.2) +
+    labs(x = "Parent Income Rank",
+         y = "% Years Working Full-Time",
+         title = "B: Labor Supply",
+         color = "Gender & Cohort") +
+    plot_theme +
+    facet_wrap(~race_ever) +
+    plot_scales +
+    plot_guides +
+    theme(legend.position = "") 
+  
+  # Arrange plots
+  fig5 <- grid.arrange(
+    fig5_a, fig5_b, 
+    nrow = 1,
+    top = textGrob(
+      "Figure A4: Partnership and Labor Supply by Race, Gender, Cohort, and Parent Income",
+      gp = gpar(fontsize = 12)
+    ),
+    bottom = textGrob(
+      gp = gpar(fontsize = 10),
+      hjust = 1,  # Right align
+      x = 1,      # Position at rightmost edge
+      "Data from the Panel Study of Income Dynamics.  Includes the Survey of Economic Opportunity Sample. Estimates from Generalized Additive Models."
+      
+    )
+  )
+  
+  return(fig5)
+}
+
+generate_fig3_race <- function(data, 
+                          x_var = "parent_hdsp_income_gender_pct_rank",
+                          y_var = "offspring_own_income_gender_pct_rank",
+                          x_label = NULL,
+                          y_label = NULL, 
+                          title = NULL) {
+  
+  # Format variable names for title if not provided
+  if (is.null(x_label)) {
+    x_label <- stringr::str_to_title(gsub("_", " ", x_var))
+  }
+  if (is.null(y_label)) {
+    y_label <- stringr::str_to_title(gsub("_", " ", y_var))
+  }
+  # Get unique cohort values
+  cohort_values <- sort(unique(data$cohort))
+  
+  # Create interaction variable for colors using actual cohort values
+  plot_data <- data %>%
+    mutate(
+      Gender = factor(ifelse(female == 1, "Women", "Men"), 
+                      levels = c("Women", "Men")),
+      group = factor(paste(Gender, cohort),
+                     levels = c(paste("Men", cohort_values[1]),
+                                paste("Women", cohort_values[1]), 
+                                paste("Men", cohort_values[2]),
+                                paste("Women", cohort_values[2])))
+    )
+  
+  # Define color palette
+  color_palette <- c("steelblue2", "orange1",
+                     "navyblue", "orange4") 
+  
+  # Create the plot
+  fig3_race <- plot_data %>% 
+    filter(race_ever %in% c("Black", "White")) %>%
+    filter(Gender == "Women") %>%
+    ggplot(aes(x = .data[[x_var]], 
+               y = .data[[y_var]], 
+               color = cohort)) +
+    geom_jitter(alpha = 0.2, size = 0.8) +
+    geom_smooth(method = "lm", 
+                linetype = "solid",
+                aes(fill = group),
+                alpha = 0.2) +
+    geom_smooth(method = "loess",
+                linetype = "dashed",
+                aes(fill = group),
+                alpha = 0.2) +
+    labs(title = "Panel C",
+         subtitle = "Gender-Specific Earnings Distribution",
+         y = "Child Earnings Rank", 
+         x = "Parental Income Rank", 
+         color = "Gender & Cohort",
+         caption = "Data from the Panel Study of Income Dynamics. \n Includes the Survey of Economic Opportunity Sample. \n Error bars show 95% confidence intervals."
+         ) +
+    theme_bw() +
+    scale_color_manual(values = color_palette) +
+    scale_fill_manual(values = color_palette) +
+    facet_grid(cols = vars(race_ever), rows = vars(cohort)) +
+    theme(
+      #legend.position = c(0.02, 0.98),  # Position in top left
+      legend.position = "",
+      legend.justification = c(0, 1),    # Align to top left
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.box.background = element_rect(color = "black", fill = "white", linewidth = 0.5),
+      legend.background = element_rect(fill = "white"), 
+      legend.key = element_rect(fill = "white"),  
+      plot.title = element_text(hjust = 0.5),
+      legend.title = element_text(""),
+      legend.margin = margin(6, 6, 6, 6)
+    ) +
+    guides(
+      color = guide_legend(override.aes = list(size = 2)),
+      fill = "none",
+      linetype = "none"
+    )
+  
+  return(fig3_race)
+}
+
+figa3 <- grid.arrange(
+  fig3_race_a,
+  fig3_race_b, fig3_race_c,
+  nrow = 2,  # Specify 2 rows instead of ncol
+  layout_matrix = rbind(c(1,1), c(2,3)),  # First row spans both columns
+  top = textGrob(
+    "Figure A3: Results by Race",
+    gp = gpar(fontsize = 15)
+  ),
+  bottom = textGrob(
+    "Data from the Panel Study of Income Dynamics. \nIncludes the Survey of Economic Opportunity Sample. \nEstimates using Generalized Additive Models.",
+    gp = gpar(fontsize = 10),
+    hjust = 1,  # Right align
+    x = 1       # Position at rightmost edge
+  ))
+
+generate_fig5_race <- function(data = data, method = method) {
+  # Get unique cohort values
+  cohort_values <- sort(unique(data$cohort))
+  
+  # Define color palette
+  color_palette <- c("steelblue2", "orange1",
+                     "navyblue", "orange4") 
+  
+  # Data preparation
+  plot_data <- data %>%
+    mutate(
+      married_norm = married/num_observedinadulthood,
+      ft_norm = ft/num_observedinadulthood,
+      Gender = factor(ifelse(female == 1, "Women", "Men"), 
+                      levels = c("Women", "Men")),
+      group = factor(paste(Gender, cohort),
+                     levels = c(paste("Men", cohort_values[1]),
+                                paste("Women", cohort_values[1]), 
+                                paste("Men", cohort_values[2]),
+                                paste("Women", cohort_values[2])))
+    ) %>%
+    filter(race_ever %in% c("Black", "White"))
+  
+  # Common theme elements
+  plot_theme <- theme_bw() +
+    theme(
+      legend.position = c(0.3, 0.3),
+      legend.justification = c(0, 1),
+      legend.box.background = element_rect(color = "black", fill = "white", linewidth = 0.5),
+      legend.background = element_rect(fill = "white"),
+      legend.key = element_rect(fill = "white"),
+      plot.title = element_text(hjust = 0.5, size = 10),
+      legend.title = element_text(""),
+      legend.margin = margin(6, 6, 6, 6)
+    )
+  
+  # Common scale elements
+  plot_scales <- list(
+    scale_color_manual(values = color_palette),
+    scale_fill_manual(values = color_palette),
+    scale_linetype_manual(values = c("solid", "dashed"))
+  )
+  
+  # Common guide elements
+  plot_guides <- guides(
+    color = guide_legend(override.aes = list(alpha = 1, size = 2)),
+    fill = "none",
+    linetype = "none"
+  )
+  
+  # Create the three plots
+  fig5_a <- ggplot(plot_data, 
+                   aes(x = parent_hdsp_income_gender_pct_rank, 
+                       y = married_norm, 
+                       color = group,
+                       linetype = cohort)) +
+    geom_smooth(method = method, aes(fill = group), alpha = 0.2) +
+    labs(x = "Parent Income Rank",
+         y = "% Years Partnered",
+         title = "A: Partnership",
+         color = "Gender & Cohort") +
+    facet_wrap(~race_ever) +
+    plot_theme +
+    plot_scales +
+    plot_guides
+  
+  fig5_b <- ggplot(plot_data, 
+                   aes(x = parent_hdsp_income_gender_pct_rank, 
+                       y = ft_norm, 
+                       color = group,
+                       linetype = cohort)) +
+    geom_smooth(method = method, aes(fill = group), alpha = 0.2) +
+    labs(x = "Parent Income Rank",
+         y = "% Years Working Full-Time",
+         title = "B: Labor Supply",
+         color = "Gender & Cohort") +
+    plot_theme +
+    plot_scales +
+    plot_guides +
+    facet_wrap(~race_ever) +
+    theme(legend.position = "") 
+  
+  # Arrange plots
+  fig5 <- grid.arrange(
+    fig5_a, fig5_b, 
+    nrow = 1,
+    top = textGrob(
+      "Figure A4: Partnership and Labor Supply by Gender, Race, Cohort, and Parent Income",
+      gp = gpar(fontsize = 12)
+    ),
+    bottom = textGrob(
+      "Data from the Panel Study of Income Dynamics. \nIncludes the Survey of Economic Opportunity Sample. \nEstimates using Generalized Additive Models.",
+      gp = gpar(fontsize = 10),
+      hjust = 1,  # Right align
+      x = 1       # Position at rightmost edge
+    )
+  )
+  
+  return(fig5)
+}
 
 #------------------------------------------------------------------------------
 generate_figa3 <- function(data, 
                           x_var = "offspring_spouse_income_gender_pct_rank",
                           y_var = "ft_norm",
-                          method = "lm",
+                          method = "loess",
                           x_label = NULL,
                           y_label = NULL, 
                           title = NULL) {
@@ -576,11 +910,11 @@ generate_figa3 <- function(data,
                 aes(fill = group),
                 alpha = 0.2) +
     labs(
-      title = title,
+      title = "Figure A2: Women's Labor Supply Responses to their Spouse's Earnings at the Top, by Cohort",
       x = x_label,
       y = y_label,
       color = "Gender", 
-      caption = "Data from the Panel Study of Income Dynamics. \n LOESS-smoothed estimates."
+      caption = "Data from the Panel Study of Income Dynamics. \n Estimates from LOESS smoothed lines."
     ) +
     theme_bw() +
     scale_color_manual(values = color_palette) +

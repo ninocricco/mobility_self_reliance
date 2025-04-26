@@ -9,6 +9,8 @@
 source("jobs/0-raw.R")
 source("jobs/0-functions.R")
 
+psid_race_ever <- readRDS("data/psid_race_ever.RDS")
+
 # Function to convert vectors to named lists for age ranges
 create_age_list <- function(ages, prefix) {
   list(setNames(list(ages), prefix))
@@ -81,6 +83,7 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
   # Creating offspring data
   unrestricted_offspring <- filtered_data %>%
     filter(period == "offspring", relhead %in% c(1, 2, 10, 20, 22)) %>%
+    left_join(psid_race_ever, by = "person") %>%
     mutate(hdsp_income = head_income + spouse_income,
            own_income = case_when(
              relhead %in% c(1, 10) ~ head_income,
@@ -89,6 +92,9 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
            wrkhrs = case_when(
              relhead %in% c(1, 10) ~ head_wrkhrs,
              relhead %in% c(2, 20, 22) ~ spouse_wrkhrs),
+           spouse_wrkhrs = case_when(
+             relhead %in% c(1, 10) ~ spouse_wrkhrs,
+             relhead %in% c(2, 20, 22) ~ head_wrkhrs),
            ed = case_when(
              relhead %in% c(1, 10) ~ head_education,
              relhead %in% c(2, 20, 22) ~ spouse_education),
@@ -96,11 +102,21 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
              wrkhrs > 1500 ~ "fulltime",
              wrkhrs > 0 ~ "parttime",
              TRUE ~ "notinlf"), 
+           race_ever = case_when(
+             relhead %in% c(1, 10) ~ headRaceever,
+             relhead %in% c(2, 20, 22) ~ spouseRaceever),
            zero_earnings = ifelse(own_income == 0, 1, 0),
            not_in_lf = ifelse(lfstatus == "notinlf", 1, 0), 
            ft = ifelse(lfstatus  == "fulltime", 1, 0),
            own_income_share = own_income/hdsp_income,
-           married = ifelse(marstat == 1, 1, 0)) %>%
+           married = ifelse(marstat == 1, 1, 0), 
+           lfstatus_spouse = case_when(
+             spouse_wrkhrs > 1500 ~ "fulltime",
+             spouse_wrkhrs > 0 ~ "parttime",
+             married == 1 & spouse_wrkhrs == 0 ~ "notinlf",
+             married == 0 ~ "nospouse"),
+           not_in_lf_spouse = ifelse(lfstatus_spouse == "notinlf", 1, 0)
+           ) %>%
     left_join(., unrestricted_summarized_parent %>% select(-period),
               by = c("person", "cohort", "female")) %>%
     # Calculate whether they are ever married as we observe them
@@ -111,7 +127,7 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
     ungroup()
   
   unrestricted_offspring_summarized <- unrestricted_offspring %>%
-    group_by(person, cohort, female) %>%
+    group_by(person, cohort, female, race_ever) %>%
     summarize(across(c(hdsp_income, own_income, 
                        head_income, spouse_income,
                        family_income, ever_married, 
@@ -120,10 +136,6 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
               num_observedinadulthood = n(),
               across(c(married, zero_earnings, not_in_lf, ft), 
                      ~ sum(.x))) %>%
-    left_join(., unrestricted_offspring %>% 
-                group_by(person, cohort, female) %>%
-                count(lfstatus) %>% filter(n == max(n)), 
-              by = c("person", "cohort", "female")) %>%
     left_join(., unrestricted_summarized_parent,
               by = c("person", "cohort", "female")) %>%
     filter(complete.cases(parent_hdsp_income)) %>%
@@ -145,9 +157,9 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
            across(c(parent_hdsp_income, parent_family_income, 
                     parent_head_income, parent_spouse_income),
                   ~ ntile(., 4), 
-                  .names = "{.col}_quintile")#, 
-           #own_income_rank_in_family_dist = ecdf(hdsp_income)(own_income) * 100,
-           #dist_own_rank_fam_rank = offspring_hdsp_income_pct_rank-own_income_rank_in_family_dist
+                  .names = "{.col}_quintile"), 
+           own_income_rank_in_family_dist = ecdf(hdsp_income)(own_income) * 100,
+           dist_own_rank_fam_rank = offspring_hdsp_income_pct_rank-own_income_rank_in_family_dist
            ) %>%
     # Creating relative measures by gender and cohort
     ungroup() %>% group_by(cohort, female) %>%
@@ -158,9 +170,9 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
                     parent_head_income, parent_spouse_income),
                   ~ rank(., ties.method = "average") / length(.) * 100, 
                   .names = "{.col}_gender_pct_rank"), 
-           own_income_gender_quintile = ntile(own_income, 4)#,
-           #own_income_gender_rank_in_family_dist = ecdf(hdsp_income)(own_income) * 100,
-           #dist_own_gender_rank_fam_rank = offspring_hdsp_income_gender_pct_rank-own_income_gender_rank_in_family_dist
+           own_income_gender_quintile = ntile(own_income, 4),
+           own_income_gender_rank_in_family_dist = ecdf(hdsp_income)(own_income) * 100,
+           dist_own_gender_rank_fam_rank = offspring_hdsp_income_gender_pct_rank-own_income_gender_rank_in_family_dist
            ) %>%
     mutate(own_income_rank_scaled_size = factor(round(
       min_rank(own_income) / n(), digits = 2))) %>%
@@ -168,10 +180,14 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
     # Creating measure to capture share absolute mobility:
     # % income strictly > than parents
     # comparing joint head+spouse, own to father, mother
-    mutate(fam.mob = ifelse(hdsp_income > parent_hdsp_income, 1, 0),
-           own.mob = ifelse(own_income > parent_hdsp_income, 1, 0),
-           dad.mob = ifelse(own_income > parent_head_income, 1, 0),
-           mom.mob = ifelse(own_income > parent_spouse_income, 1, 0)) %>%
+    mutate(abs.fam.mob = ifelse(hdsp_income > parent_hdsp_income, 1, 0),
+           abs.own.mob = ifelse(own_income > parent_hdsp_income, 1, 0),
+           abs.dad.mob = ifelse(own_income > parent_head_income, 1, 0),
+           abs.mom.mob = ifelse(own_income > parent_spouse_income, 1, 0), 
+           rel.fam.mob = ifelse(offspring_hdsp_income_pct_rank > parent_hdsp_income_pct_rank, 1, 0),
+           rel.own.mob = ifelse(own_income_rank_in_family_dist > parent_hdsp_income_pct_rank, 1, 0),
+           
+           ) %>%
     filter(complete.cases(period), 
            num_observedinchildhood >= minobs_childhood,
            num_observedinadulthood >= minobs_adulthood)
@@ -181,4 +197,5 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
               "parent_perm" = unrestricted_summarized_parent))
   
 }
+
 
