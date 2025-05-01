@@ -115,7 +115,7 @@ gen_data <- function(parental_age_range = list("parent_ages" = 10:18),
              spouse_wrkhrs > 0 ~ "parttime",
              married == 1 & spouse_wrkhrs == 0 ~ "notinlf",
              married == 0 ~ "nospouse"),
-           not_in_lf_spouse = ifelse(lfstatus_spouse == "notinlf", 1, 0)
+           not_in_lf_spouse = ifelse(lfstatus_spouse %in% c("notinlf", "nospouse"), 1, 0)
            ) %>%
     left_join(., unrestricted_summarized_parent %>% select(-period),
               by = c("person", "cohort", "female")) %>%

@@ -1,3 +1,13 @@
+data <- gen_data(cohorts = list("1970-1985" = 1970:1985))$offspring_perm %>%
+  mutate(parent_rank = percent_rank(parent_hdsp_income) * 100) %>%
+  mutate(parent_ptile = as.numeric(as.character(
+    factor(cut(parent_rank,
+               breaks = seq(0, 100, by = 10),
+               include.lowest = TRUE,
+               right = FALSE),
+           labels = seq(10, 100, by = 10)))),
+    gender = ifelse(female == 1, "Women", "Men"))
+
 # Calculate the partner contribution decomposition
 mobility_decomposition <- data %>%
   # Create necessary indicators
@@ -74,9 +84,81 @@ mobility_decomposition <- data %>%
 # Check the output
 summary(mobility_decomposition)
 
+# Calculate the partner contribution decomposition
+mobility_decomposition_full <- data %>%
+  # Create necessary indicators
+  mutate(
+    # Indicator for having a mobility gap (own income < parent income)
+    has_gap = own_income < parent_hdsp_income,
+    
+    # Indicator for having a partner
+    has_partner = married/num_observedinadulthood,
+    
+    # Indicator for closing the gap with family income
+    closes_gap = hdsp_income >= parent_hdsp_income & has_gap,
+    
+    # Indicator for partner contribution to mobility
+    partner_contribution = abs.fam.mob == 1 & abs.own.mob == 0
+  ) %>%
+  # Group by parental income percentile (and any other grouping variables)
+  group_by(gender, cohort) %>%
+  summarise(
+    # Sample size in this cell (for diagnostics)
+    n = n(),
+    
+    # Observed partner contribution to mobility
+    observed_partner_share = mean(partner_contribution),
+    
+    # Verify calculation method
+    observed_partner_share_alt = mean(abs.fam.mob) - mean(abs.own.mob),
+    
+    # Component 1: Partnership rate
+    partnership_rate = mean(has_partner),
+    
+    # Component 2: Gap prevalence (proportion with mobility gap)
+    gap_prevalence = mean(has_gap),
+    
+    # Count partnered people with gaps (for diagnostics)
+    n_partner_with_gap = sum(has_partner & has_gap),
+    
+    # Component 3: Gap closing rate
+    # Using sum() instead of mean() to properly calculate conditional probability
+    gap_closing_rate = if_else(
+      sum(has_partner & has_gap) > 0,
+      sum(has_partner & has_gap & closes_gap) / sum(has_partner & has_gap),
+      NA_real_  # Handle cases with zero denominator
+    ),
+    
+    # For comparison: Unconditional gap closing rate
+    uncond_closing_rate = mean(closes_gap & has_partner)
+  ) %>%
+  # Calculate decomposition product
+  mutate(
+    # The decomposed partner contribution
+    decomposed_share = partnership_rate * gap_prevalence * gap_closing_rate,
+    cf_eq_partnership = case_when(gender == "Women" ~ 1 * gap_prevalence * gap_closing_rate,
+                                  gender == "Men" ~ 1 * gap_prevalence * gap_closing_rate),
+    
+    # Calculate ratio to check accuracy of decomposition
+    decomp_ratio = if_else(
+      observed_partner_share > 0,
+      decomposed_share / observed_partner_share,
+      NA_real_
+    ),
+    
+    # Add a calibrated version if needed
+    calibrated_closing_rate = if_else(
+      partnership_rate * gap_prevalence > 0,
+      observed_partner_share / (partnership_rate * gap_prevalence),
+      NA_real_
+    ),
+    
+    # Add normalized decomposition
+    normalized_decomp = partnership_rate * gap_prevalence * calibrated_closing_rate
+  )
+
 # Visualization of decomposition
 mobility_decomposition %>%
-  filter(cohort == "1970-1985") %>%
   select(gender, parent_ptile, decomposed_share, partnership_rate,
          gap_prevalence, gap_closing_rate) %>%
   gather(key, value, -c(gender, parent_ptile, cohort)) %>%
@@ -109,11 +191,10 @@ mobility_decomposition %>%
   ) 
 
 mobility_decomposition %>%
-  filter(cohort == "1970-1985") %>%
   select(gender, parent_ptile, decomposed_share, cf_eq_partnership) %>%
   gather(key, value, -c(gender, parent_ptile, cohort)) %>%
   mutate(key = case_when(key == "decomposed_share" ~ "Partner Contributions", 
-                         key == "cf_eq_partnership" ~ "No Class Gradient in Partnership")) %>%
+                         key == "cf_eq_partnership" ~ "Full Partnership")) %>%
   ggplot(aes(x = parent_ptile, linetype = key, y = value)) +
   geom_line() +
   facet_grid(~gender)+

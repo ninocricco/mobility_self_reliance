@@ -72,7 +72,7 @@ blups_tbl <- models_tbl %>%
   select(sex, source, model_type, blups) %>%
   unnest(blups) %>%
   left_join(df %>% distinct(person, parent_hdsp_income),
-            by = "person") %>%
+            by = c("person")) %>%
   mutate(parent_percentile = ntile(parent_hdsp_income, 100)) %>%
   pivot_longer(c(intercept,slope),
                names_to = "component",
@@ -93,7 +93,7 @@ re_var_men <- blups_tbl %>% filter(sex == "Men") %>%
        title = "Random effect variance by model, source, and social origins", 
        subtitle = "Men") +
   theme_minimal() +
-  scale_colour_manual(values = c("coral2", "steelblue")) +
+  scale_color_manual(values = c("dodgerblue2", "darkorange3")) +
   theme(
     legend.position = "bottom",
     legend.box      = "vertical",
@@ -119,7 +119,7 @@ re_var_women <- blups_tbl %>% filter(sex == "Women") %>%
        title = "Random effect variance by model, source, and social origins", 
        subtitle = "Women") +
   theme_minimal() +
-  scale_colour_manual(values = c("coral2", "steelblue")) +
+  scale_color_manual(values = c("dodgerblue2", "darkorange3")) +
   theme(
     legend.position = "bottom",
     legend.box      = "vertical",

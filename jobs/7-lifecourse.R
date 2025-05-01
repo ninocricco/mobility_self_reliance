@@ -10,6 +10,7 @@ test_perm <- gen_data(
   cohorts = list("1950-1959" = 1950:1959,
                  "1960-1969" = 1960:1969, 
                  "1970-1979" = 1970:1979))$offspring_perm %>%
+  filter(complete.cases(parent_hdsp_income)) %>%
   select(person, cohort, parent_hdsp_income_quintile)
 
 test_lifetime <- test %>% 
@@ -23,7 +24,7 @@ test_lifetime <- test %>%
 
 test_cumulative <- test %>% 
   select(person, age, year, female, cohort, 
-         married, not_in_lf,
+         married, not_in_lf, not_in_lf_spouse,
          own_income, spouse_income, hdsp_income) %>%
   arrange(person, age) %>%
   group_by(person) %>%
@@ -88,7 +89,58 @@ test_cumulative %>%
 test_cumulative %>%
   ungroup() %>%
   group_by(age, cohort, female, parent_hdsp_income_quintile) %>%
-  summarise(across(c(share_cum_own), 
+  summarise(across(c(not_in_lf_spouse, married), 
+                   ~ mean(.))) %>%
+  mutate(not_in_lf_spouse = 1 - not_in_lf_spouse) %>%
+  rename(have_working_spouse = not_in_lf_spouse) %>%
+  left_join(., test_cumulative %>%
+              ungroup() %>%
+              filter(married == 1) %>%
+              group_by(age, cohort, female, parent_hdsp_income_quintile) %>%
+              summarise(across(c(not_in_lf_spouse), 
+                               ~ 1-mean(.))), 
+            by = c("age", "cohort", "female", "parent_hdsp_income_quintile")) %>%
+  rename(spouse_working_if_married = not_in_lf_spouse) %>%
+  mutate(female = ifelse(female == 1, "Women", "Men"), 
+         parent_hdsp_income_quintile = case_when(parent_hdsp_income_quintile == 1 ~ "<25th", 
+                                                 parent_hdsp_income_quintile == 2 ~ "25th-50th",
+                                                 parent_hdsp_income_quintile == 3 ~ "50th-75th",
+                                                 parent_hdsp_income_quintile == 4 ~ ">=75th"),
+         parent_hdsp_income_quintile = factor(parent_hdsp_income_quintile, 
+                                              levels = c("<25th", "25th-50th", "50th-75th", ">=75th"))) %>%
+  filter(cohort == "1950-1959", parent_hdsp_income_quintile %in% c("<25th", ">=75th")) %>%
+  gather(key, value, - c(age, cohort, female, parent_hdsp_income_quintile)) %>%
+  mutate(key = case_when(key == "married" ~ "P(Partnered)", 
+                         key == "have_working_spouse" ~ "P(Working Partner)", 
+                         key == "spouse_working_if_married" ~ "P(Working Partner | Partnered)")) %>%
+  ggplot(aes(x = age, y = value, linetype = key)) +
+  geom_line() +
+  facet_grid(cols = vars(parent_hdsp_income_quintile), 
+             rows = vars(female)) +
+  scale_linetype_manual(values = c( "dashed", "dotted", "solid")) +
+  labs(color = "",
+       x = "Age",
+       y = "Percent", 
+       title = "Probability of Having a Working Partner by Age, Gender, and Social Origin",
+       caption = "Data from the Panel Study of Income Dynamics, SRC Sample. \n Sample includes reference persons and spouses born 1950-1959. \n Origin quartile is measured with average household income at ages 10-18. "
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical",
+    legend.title = element_blank(),
+    plot.title = element_text(size = 14, hjust = .5, face = "bold"),
+    strip.text = element_text(size = 12),
+    legend.text=element_text(size = 12),
+    plot.caption = element_text(face = "italic"),
+    axis.text.x =element_text(size = 8, angle = 45),
+    axis.text.y =element_text(size = 8)
+  )
+
+test_cumulative %>%
+  ungroup() %>%
+  group_by(age, cohort, female, parent_hdsp_income_quintile) %>%
+  summarise(across(c(own_income), 
                    ~ mean(.))) %>%
   filter(complete.cases(parent_hdsp_income_quintile)) %>%
   mutate(female = ifelse(female == 1, "Women", "Men"), 
@@ -100,7 +152,7 @@ test_cumulative %>%
                                               levels = c("<25th", "25th-50th", "50th-75th", ">=75th"))) %>%
   filter(cohort == "1950-1959") %>%
   filter(female == "Women") %>%
-  ggplot(aes(x = age, y = share_cum_own)) +
+  ggplot(aes(x = age, y = own_income)) +
   geom_point() +
   geom_smooth(method = "gam") +
   facet_grid(cols = vars(parent_hdsp_income_quintile)) +
