@@ -1,6 +1,6 @@
 source("jobs/60-gensample.R")
 
-data %>% mutate(spouse_distance.obs = spouse_income-parent_hdsp_income, 
+distances <- data %>% mutate(spouse_distance.obs = spouse_income-parent_hdsp_income, 
                 own_distance.obs = own_income-parent_hdsp_income,
                 family_distance.obs = hdsp_income-parent_hdsp_income) %>%
   mutate(parent_ptile = as.numeric(
@@ -22,7 +22,31 @@ data %>% mutate(spouse_distance.obs = spouse_income-parent_hdsp_income,
                                                 "Upward Mobility: < 25 %", "Upward Mobility: Between 75 and 25 %", "Upward Mobility: > 75 %")),
          key = factor(case_when(key == "own_distance.obs"~ "Personal Earnings", 
                          key == "spouse_distance.obs" ~ "Partner Earnings", 
-                         TRUE ~ "Family Income"), levels = c("Family Income", "Personal Earnings", "Partner Earnings"))) %>%
+                         TRUE ~ "Family Income"), levels = c("Family Income", "Personal Earnings", "Partner Earnings")))
+
+distances %>%
+  group_by(gender, key) %>%
+  count(dist_mag, name = "n") %>%       # same as group_by() + summarise(n = n())
+  complete(dist_mag,                    # list every level of `group`
+           fill = list(n = 0)) %>%   # turn absent groups into n = 0
+  mutate(freq = n / sum(n)) %>%
+  separate(dist_mag, ":", into = c("kind", "magnitude")) %>%
+  filter(kind == "Upward Mobility") %>%
+  summarise(sum(freq))
+
+distances %>%
+  group_by(gender, key) %>%
+  count(dist_mag, name = "n") %>%       # same as group_by() + summarise(n = n())
+  complete(dist_mag,                    # list every level of `group`
+           fill = list(n = 0)) %>%   # turn absent groups into n = 0
+  mutate(freq = n / sum(n)) %>% 
+  separate(dist_mag, ":", into = c("kind", "magnitude")) %>%
+  mutate(kind = ifelse(kind == "Upward Mobility", "Up", "Down"),
+         dist_mag = paste(kind, magnitude, sep = ",")) %>%
+  select(-c(n, magnitude, kind)) %>%
+  pivot_wider(names_from = dist_mag, values_from = freq)
+
+distances %>%
   group_by(gender, parent_ptile, key) %>%
   count(dist_mag, name = "n") %>%       # same as group_by() + summarise(n = n())
   complete(dist_mag,                    # list every level of `group`
